@@ -1,0 +1,28 @@
+import mongoose from "mongoose";
+
+const courseProgressSchema = new mongoose.Schema({
+  courseID: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Course",
+  },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    // Note: User model is in user-service, so we store the ID without ref
+  },
+  completedVideos: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubSection",
+    },
+  ],
+});
+
+courseProgressSchema.index({ courseID: 1, userId: 1 });
+// Reversed compound for getUserProgressForCourses: find({ userId, courseID: { $in: [...] } })
+courseProgressSchema.index({ userId: 1, courseID: 1 });
+
+const CourseProgress =
+  mongoose.models.CourseProgress ||
+  mongoose.model("CourseProgress", courseProgressSchema);
+
+export default CourseProgress;

@@ -1,0 +1,557 @@
+import { uploadImagetoCloudinary } from "../../shared-utils/imageUploader.js";
+import Profile from "../models/Profile.js";
+import mongoose from "mongoose";
+import User from "../models/User.js";
+import jwt from "jsonwebtoken";
+import cloudinary from 'cloudinary';
+import { courseService } from '../utils/serviceClients.js'
+
+export const getUserDetails = async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const userDetails = await User.findOne({ email }).populate(
+      "additionalDetails"
+    );
+
+    if (!userDetails) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true, // Fixed typo
+      userDetails,
+      message: "User found",
+    });
+  } catch (error) {
+    console.error("Error fetching user details:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+export const updateProfile = async (req, res) => {
+  try {
+    const {
+      email,
+      dateOfBirth,
+      about,
+      contactNumber,
+      gender,
+      firstName,
+      lastName,
+    } = req.body;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
+    }
+
+    // Fetch user details along with additional profile details
+    const userDetails = await User.findOne({ email }).populate(
+      "additionalDetails"
+    );
+    // console.log(userDetails);
+    if (!userDetails) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+    await User.findOneAndUpdate(
+      { email },
+      { $set: { firstName, lastName } },
+      { new: true }
+    );
+
+    // Get profile ID from user's additional details
+    const profileId = userDetails.additionalDetails;
+
+    if (!profileId) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Profile not found" });
+    }
+
+    // Create an update object and add only provided fields
+    const updateFields = {};
+    if (dateOfBirth) updateFields.dateOfBirth = new Date(dateOfBirth);
+    if (about) updateFields.about = about;
+    if (contactNumber) updateFields.contactNumber = contactNumber;
+    if (gender) updateFields.gender = gender;
+    // Update the profile only if there are fields to update
+    if (Object.keys(updateFields).length > 0) {
+      await Profile.findByIdAndUpdate(profileId, updateFields, { new: true });
+    }
+
+    return res
+      .status(200)
+      .json({
+        success: true,
+        message: "everything for profile updated successfully",
+      });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+export const deleteAccount = async (req, res) => {
+  try {
+    // Get user ID attached by the authenticateToken middleware
+    const userId = req.user.id;
+
+    // Find user by ID
+    const userDetails = await User.findById(userId);
+    if (!userDetails) {
+      return res.status(400).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Delete associated profile
+    const profileId = userDetails.additionalDetails;
+    if (profileId) {
+      await Profile.findByIdAndDelete(profileId);
+    }
+
+    // Delete user account
+    await User.findByIdAndDelete(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Account Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error: Unable to delete account",
+    });
+  }
+};
+
+export const getAllUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const users = await User.findById({})
+      .populate("additionalDetails")
+      .exec();
+    return res.status(200).json({
+      success: true,
+      message: "All Users...",
+      data: users,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Can't get all users, some error occured ...",
+    });
+  }
+};
+
+export const getEnrolledCourses = async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    // 1. Get user's enrolled course IDs (from user-service)
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const courseIds = user.courses;
+    if (!courseIds || courseIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // 2. Call course-service to get course details
+    const courseDetailsResponse = await courseService.get('/course/get-courses-by-ids', {
+      params: { ids: courseIds.join(',') },
+    });
+
+    const courseDetails = courseDetailsResponse.data;
+
+    if (!courseDetails.success || !courseDetails.data) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch course details from course service",
+      });
+    }
+
+    // 3. Fetch progress for ALL enrolled courses in one query
+    let progressMap = {}; // courseId → completedVideosCount
+    try {
+      const progressResponse = await courseService.get('/course/user-progress', {
+        params: { userId, courseIds: courseIds.join(',') },
+      });
+      if (progressResponse.data?.success) {
+        progressMap = progressResponse.data.data || {};
+      }
+    } catch (err) {
+      console.error('Error fetching user progress:', err.message);
+    }
+
+    // 4. Calculate duration/lectures and attach progress — return only what the UI needs
+    const coursesWithDuration = courseDetails.data.map((course) => {
+      let totalDurationInSeconds = 0;
+      let totalSubSections = 0;
+
+      course.courseContent.forEach((section) => {
+        totalSubSections += section.subSection.length;
+        section.subSection.forEach((sub) => {
+          totalDurationInSeconds += parseFloat(sub.timeDuration) || 0;
+        });
+      });
+
+      const completedCount = progressMap[course._id.toString()] || 0;
+      const progressPercentage =
+        totalSubSections > 0
+          ? Math.round((completedCount / totalSubSections) * 100)
+          : 0;
+
+      return {
+        _id: course._id,
+        courseName: course.courseName,
+        courseDescription: course.courseDescription,
+        thumbnail: course.thumbnail,
+        price: course.price,
+        firstSectionId: course.courseContent?.[0]?._id,
+        firstSubSectionId: course.courseContent?.[0]?.subSection?.[0]?._id,
+        totalDurationInSeconds,
+        totalLectures: totalSubSections,
+        completedLectures: completedCount,
+        progressPercentage,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: coursesWithDuration,
+    });
+  } catch (error) {
+    console.error("Error fetching enrolled courses:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Can't fetch the enrolled courses",
+      error: error.message,
+    });
+  }
+};
+
+export const instructorDetails = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    // Validate presence
+    if (!userId || typeof userId !== "string" || userId.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message: "Missing or invalid userId in request.",
+      });
+    }
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid userId format.",
+      });
+    }
+
+    // Fetch instructor with profile details
+    const instructor = await User.findOne({
+      _id: userId.trim(),
+      accountType: "Instructor",
+    }).populate("additionalDetails");
+
+    if (!instructor) {
+      return res.status(404).json({
+        success: false,
+        message: "Instructor not found",
+      });
+    }
+
+    // Fetch courses from course-service
+    let courses = [];
+    if (instructor.courses?.length > 0) {
+      const courseIds = instructor.courses.map((id) => id.toString());
+      const courseRes = await courseService.get("/course/get-courses-by-ids", {
+        params: { ids: courseIds.join(",") },
+      });
+      courses = courseRes.data?.data || [];
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Instructor data fetched successfully.",
+      instructor: {
+        ...instructor.toObject(),
+        courses,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching instructor details:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error while fetching instructor details",
+    });
+  }
+};
+
+export const updateDisplayPicture = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const imageFile = req.files?.displayPicture;
+
+    // 1. Validate email
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+
+    // 2. Check if user exists
+    const existingUser = await User.findOne({ email });
+    if (!existingUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // 3. Validate file
+    if (!imageFile) {
+      return res.status(400).json({ success: false, message: "No image file uploaded" });
+    }
+
+    // Save old image URL before updating
+    const oldImageUrl = existingUser.image;
+
+    // 4. Upload new image
+    const uploadedImage = await uploadImagetoCloudinary(
+      imageFile,
+      process.env.FOLDER_NAME
+    );
+
+    // 5. Update user with new image
+    const updatedUser = await User.findOneAndUpdate(
+      { email },
+      { image: uploadedImage.secure_url },
+      { new: true }
+    ).populate("additionalDetails");
+
+    // 6. Delete old image from Cloudinary (if it exists)
+    if (oldImageUrl) {
+      try {
+        // Extract the public_id including folder name
+        const publicId = oldImageUrl
+          .split("/")
+          .slice(-2) // gets [folderName, filename]
+          .join("/")
+          .split(".")[0]; // remove file extension
+
+        await cloudinary.v2.uploader.destroy(publicId, {
+          resource_type: "image",
+        });
+
+        console.log(`Old image deleted from Cloudinary: ${publicId}`);
+      } catch (deleteErr) {
+        console.warn("Failed to delete old image from Cloudinary:", deleteErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Display picture updated successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    console.error("updateDisplayPicture error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Add course to user profile
+export const addCourseToProfile = async (req, res) => {
+  try {
+    const { userId, courseId } = req.body;
+
+    if (!userId || !courseId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and Course ID are required"
+      });
+    }
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(courseId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID or Course ID format"
+      });
+    }
+
+    // Find user and add course to their courses array
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Check if course is already enrolled
+    if (user.courses.includes(courseId)) {
+      return res.status(400).json({
+        success: false,
+        message: "User is already enrolled in this course"
+      });
+    }
+
+    // Add course to user's courses array
+    user.courses.push(courseId);
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Course added to user profile successfully",
+      data: user
+    });
+  } catch (error) {
+    console.error("Error adding course to profile:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// Remove course from user profile
+export const removeCourseFromProfile = async (req, res) => {
+  try {
+    const { userId, courseId } = req.body;
+
+    if (!userId || !courseId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and Course ID are required"
+      });
+    }
+
+    // Validate ObjectId format
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(courseId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID or Course ID format"
+      });
+    }
+
+    // Find user and remove course from their courses array
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Check if course is enrolled
+    if (!user.courses.includes(courseId)) {
+      return res.status(400).json({
+        success: false,
+        message: "User is not enrolled in this course"
+      });
+    }
+
+    // Remove course from user's courses array
+    user.courses = user.courses.filter(course => course.toString() !== courseId.toString());
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Course removed from user profile successfully",
+      data: user
+    });
+  } catch (error) {
+    console.error("Error removing course from profile:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+// Add course progress reference to user profile
+export const addCourseProgressToProfile = async (req, res) => {
+  try {
+    const { userId, progressId } = req.body;
+
+    if (!userId || !progressId) {
+      return res.status(400).json({ success: false, message: 'User ID and Progress ID are required' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid User ID' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.courseProgress && user.courseProgress.some(id => id.toString() === progressId.toString())) {
+      return res.status(200).json({ success: true, message: 'Progress already added', data: user });
+    }
+
+    user.courseProgress = user.courseProgress || [];
+    user.courseProgress.push(progressId);
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Progress added to user profile', data: user });
+  } catch (error) {
+    console.error('Error adding progress to profile:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Remove course progress reference from user profile
+export const removeCourseProgressFromProfile = async (req, res) => {
+  try {
+    const { userId, progressId } = req.body;
+
+    if (!userId || !progressId) {
+      return res.status(400).json({ success: false, message: 'User ID and Progress ID are required' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid User ID' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    user.courseProgress = (user.courseProgress || []).filter(id => id.toString() !== progressId.toString());
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Progress removed from user profile', data: user });
+  } catch (error) {
+    console.error('Error removing progress from profile:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};

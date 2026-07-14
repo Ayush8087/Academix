@@ -1,0 +1,171 @@
+import './App.css';
+import { Route, Routes, useLocation } from 'react-router-dom';
+import { Auth0Provider } from '@auth0/auth0-react';
+import Home from './pages/Home';
+import Navbar from './components/common/Navbar';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import SetupPassword from './pages/SetupPassword';
+import ForgotPassword from './pages/ForgotPassword';
+import ChangePassword from './pages/ChangePassword';
+import ResendMail from './pages/ResendMail';
+import ResetComplete from './pages/ResetComplete';
+import VerifyEmail from './pages/VerifyEmail';
+import UpdateProfile from './pages/UpdateProfile';
+import DashBoard from './pages/Dashboard';
+import Profile from '../src/components/core/Dashboard/MyProfile';
+import Cart from './components/core/Dashboard/Cart';
+import Settings from './components/core/Dashboard/Settings';
+import EnrolledCourses from './components/core/Dashboard/EnrolledCourses';
+import EditCourse from './components/core/Dashboard/EditCourse';
+import AddCourse from './components/core/Dashboard/AddCourse';
+import InstructorCourses from './components/core/Dashboard/MyCourses';
+import Instructor from './components/core/Dashboard/InstructorDashboard/Instructor';
+import SmartStudyCompanion from './components/core/Dashboard/SmartStudyCompanion';
+import AIStudyAssistant from './components/core/Dashboard/AIStudyAssistant';
+import TextToVideoSummarizer from './components/core/Dashboard/TextToVideoSummarizer';
+
+// Admin Components
+import AdminDashboardOverview from './components/core/Admin/AdminDashboardOverview';
+import UserManagement from './components/core/Admin/UserManagement';
+import InstructorManagement from './components/core/Admin/InstructorManagement';
+import CourseManagement from './components/core/Admin/CourseManagement';
+import RefundManagement from './components/core/Admin/RefundManagement';
+import About from './pages/About';
+import Catalog from './pages/Catalog';
+import ViewCourse from "./pages/ViewCourse";
+import VideoDetails from "./components/core/ViewCourse/VideoDetails";
+import DiscussionPage from "./components/core/ViewCourse/DiscussionPage";
+import CourseDetails from './pages/CourseDetails';
+import ContactUsPage from './pages/Contact';
+import Footer from './components/common/Footer';
+import GoogleAuthHandler from './components/core/Auth/GoogleAuthHandler';
+import Auth0Callback from './pages/Auth0Callback';
+import BecomeInstructor from './components/core/Dashboard/BecomeInstructor';
+import PrivateRoute from './components/core/Auth/PrivateRoute';
+import EnrolledRoute from './components/core/Auth/EnrolledRoute';
+import { ACCOUNT_TYPE } from './utils/constants';
+
+function App() {
+  const location = useLocation();
+
+  // Check if current route starts with "/dashboard" or "/admin"
+  const isDashboard = location.pathname.startsWith("/dashboard") || location.pathname.startsWith("/admin");
+  const isviewCourse = location.pathname.startsWith("/view-course");
+
+  return (
+    <Auth0Provider
+      domain={process.env.REACT_APP_AUTH0_DOMAIN}
+      clientId={process.env.REACT_APP_AUTH0_CLIENT_ID}
+      authorizationParams={{
+        redirect_uri: `${window.location.origin}/auth0/callback`,
+      }}
+    >
+      <GoogleAuthHandler />
+      <div className="w-full min-h-screen bg-[#121220] flex flex-col font-inter">
+        {/* Fixed Navbar */}
+        <div className="fixed top-0 left-0 w-full z-50 bg-[#121220] border-b border-gray-800">
+          <Navbar />
+        </div>
+
+        {/* Add padding-top so content doesn’t hide behind fixed Navbar */}
+        <main className="flex-1 w-full pt-[3.5rem] overflow-x-hidden">
+          <Routes>
+            {/* Auth0 Callback */}
+            <Route path="/auth0/callback" element={<Auth0Callback />} />
+            {/* Public Routes */}
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/setup-password" element={<SetupPassword />} />
+            <Route path="/forgotPassword" element={<ForgotPassword />} />
+            <Route path="/resendMail" element={<ResendMail />} />
+            <Route path="/resetComplete" element={<ResetComplete />} />
+            <Route path="/update-Password" element={<ChangePassword />} />
+            <Route path="/updateProfile" element={<UpdateProfile />} />
+            <Route path="/verifyEmail" element={<VerifyEmail />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/contact" element={<ContactUsPage />} />
+            <Route path="/catalog/:catalogName" element={<Catalog />} />
+            <Route path="/courses/:courseId" element={<CourseDetails />} />
+
+            {/* Dashboard Routes — requires login; child routes further restrict by role */}
+            <Route
+              path="/dashboard"
+              element={
+                <PrivateRoute>
+                  <div className="w-screen m-0">
+                    <DashBoard />
+                  </div>
+                </PrivateRoute>
+              }
+            >
+              {/* Student + Instructor */}
+              <Route path="my-profile" element={<Profile />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="smart-study" element={<SmartStudyCompanion />} />
+              <Route path="ai-study-assistant" element={<AIStudyAssistant />} />
+              <Route path="text-to-video-summarizer" element={<TextToVideoSummarizer />} />
+
+              {/* Student only */}
+              <Route path="cart" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.STUDENT]}><Cart /></PrivateRoute>} />
+              <Route path="enrolled-courses" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.STUDENT]}><EnrolledCourses /></PrivateRoute>} />
+              <Route path="become-instructor" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.STUDENT]}><BecomeInstructor /></PrivateRoute>} />
+
+              {/* Instructor only */}
+              <Route path="add-courses" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.INSTRUCTOR]}><AddCourse /></PrivateRoute>} />
+              <Route path="instructor-courses" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.INSTRUCTOR]}><InstructorCourses /></PrivateRoute>} />
+              <Route path="instructor" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.INSTRUCTOR]}><Instructor /></PrivateRoute>} />
+              <Route path="edit-course/:courseId" element={<PrivateRoute allowedRoles={[ACCOUNT_TYPE.INSTRUCTOR]}><EditCourse /></PrivateRoute>} />
+            </Route>
+
+            {/* Admin Routes — Admin role required */}
+            <Route
+              path="/admin"
+              element={
+                <PrivateRoute allowedRoles={[ACCOUNT_TYPE.ADMIN]}>
+                  <div className="w-screen m-0">
+                    <DashBoard />
+                  </div>
+                </PrivateRoute>
+              }
+            >
+              <Route path="my-profile" element={<AdminDashboardOverview />} />
+              <Route path="dashboard" element={<AdminDashboardOverview />} />
+              <Route path="users" element={<UserManagement />} />
+              <Route path="instructors" element={<InstructorManagement />} />
+              <Route path="courses" element={<CourseManagement />} />
+              <Route path="refunds" element={<RefundManagement />} />            </Route>
+
+            {/* Course View — login + enrollment required */}
+            <Route
+              path="/view-course/:courseId"
+              element={
+                <EnrolledRoute>
+                  <div className="w-screen m-0">
+                    <ViewCourse />
+                  </div>
+                </EnrolledRoute>
+              }
+            >
+              <Route
+                path="section/:sectionId/sub-section/:subSectionId"
+                element={<VideoDetails />}
+              />
+              <Route
+                path="discussion"
+                element={<DiscussionPage />}
+              />
+            </Route>
+          </Routes>
+        </main>
+
+        {/* Footer is handled inside Dashboard/ViewCourse; only show here for public pages */}
+        {!isDashboard && !isviewCourse && <Footer />}
+
+      </div>
+    </Auth0Provider>
+  );
+}
+
+export default App;

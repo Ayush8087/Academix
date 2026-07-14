@@ -1,0 +1,48 @@
+{
+  "name": "academix-backend",
+  "version": "1.0.0",
+  "description": "Academix microservices backend - npm workspaces",
+  "private": true,
+  "workspaces": [
+    "user-service",
+    "course-service",
+    "payment-service",
+    "ai-service",
+    "api-gateway",
+    "shared-utils"
+  ],
+  "scripts": {
+    "kill-ports": "powershell -NoProfile -Command \"@(4000,4001,4002,4003,4004) | ForEach-Object { $c = Get-NetTCPConnection -LocalPort $_ -EA SilentlyContinue | Select-Object -First 1; if ($c) { Stop-Process -Id $c.OwningProcess -Force -EA SilentlyContinue } }\"",
+    "dev": "npm run kill-ports && concurrently \"npm run dev --workspace=user-service\" \"npm run dev --workspace=course-service\" \"npm run dev --workspace=payment-service\" \"npm run dev --workspace=ai-service\" \"npm run dev --workspace=api-gateway\"",
+    "start": "npm run kill-ports && concurrently \"npm start --workspace=user-service\" \"npm start --workspace=course-service\" \"npm start --workspace=payment-service\" \"npm start --workspace=ai-service\" \"npm start --workspace=api-gateway\"",
+    "install:all": "npm install",
+    "clean": "rm -rf node_modules */node_modules"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "bcryptjs": "^2.4.3",
+    "bullmq": "^5.76.5",
+    "cloudinary": "^2.5.1",
+    "compression": "^1.7.5",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-fileupload": "^1.5.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^8.0.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.1",
+    "node-mailjet": "^6.0.0",
+    "nodemailer": "^6.9.16",
+    "otp-generator": "^4.0.1",
+    "razorpay": "^2.9.6"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.9"
+  }
+}
